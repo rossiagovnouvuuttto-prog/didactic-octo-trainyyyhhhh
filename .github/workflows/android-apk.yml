@@ -1,0 +1,68 @@
+name: Build Android APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Extract app sources
+        run: |
+          mkdir -p source
+          base64 -d project-source.tar.xz.b64 | tar -xJ -C source
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Configure Firebase
+        working-directory: source
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/google-services.json
+          else
+            cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "123456789000",
+              "project_id": "svoychat-placeholder",
+              "storage_bucket": "svoychat-placeholder.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:123456789000:android:1234567890abcdef123456",
+                "android_client_info": {"package_name": "com.example.svoychat"}
+              },
+              "oauth_client": [],
+              "api_key": [{"current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}],
+              "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+            }],
+            "configuration_version": "1"
+          }
+          JSON
+          fi
+      - name: Compile debug APK
+        working-directory: source
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Publish APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SvoyChat-debug-apk
+          path: source/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
